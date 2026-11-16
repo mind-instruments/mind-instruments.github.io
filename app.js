@@ -3,6 +3,7 @@ import {createMyCalendar} from './my-calendar.js';
 import {createSecurityUI} from './security-ui.js';
 import {createPlanningUI} from './planning-ui.js';
 import {createAccountUI} from './account-ui.js';
+import {createUserDirectory} from './user-directory-ui.js';
 import {createWorkflowUI,bookingReviewLabel,reviewRequest} from './workflow-ui.js';
 import {analysisView} from './analytics-ui.js';
 import { DEFAULT_INSTRUMENT, defaultInstrument, instrumentFor, instrumentAdmin, resourceId, certificationLevels, certificationFor, qualification, bookingMethod } from './resources.js';
@@ -12,7 +13,8 @@ import { manager, system, manages, labAccess, active, occupied, canSign, rulesFo
 import { labels, errors } from './i18n.js';
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const state={lang:localStorage.getItem('vero-language')||'zh',page:'home',manage:false,week:dateKey(),tab:'bookings',calendarHours:'day',selected:new Set(),anchor:null,probeTable:null,auth:'login',instrument:DEFAULT_INSTRUMENT,calendarReady:false,certDraft:new Map(),certSearch:'',certLab:'',analyticsResult:null,analyticsLoading:false,analyticsError:'',analyticsSequence:0,analysis:{period:'30',from:plusDays(dateKey(),-29),to:dateKey(),today:dateKey(),instrument:'',lab:'',tab:'instruments',group:''}};
+const state={lang:localStorage.getItem('vero-language')||'zh',page:'home',manage:false,week:dateKey(),tab:'bookings',calendarHours:'day',selected:new Set(),anchor:null,probeTable:null,auth:'login',instrument:DEFAULT_INSTRUMENT,calendarReady:false,certDraft:new Map(),certSearch:'',certLab:'',userDirectory:{search:'',lab:'',role:'',sort:'lab',descending:false,days:90},analyticsResult:null,analyticsLoading:false,analyticsError:'',analyticsSequence:0,analysis:{period:'30',from:plusDays(dateKey(),-29),to:dateKey(),today:dateKey(),instrument:'',lab:'',tab:'instruments',group:''}};
+function resetDirectory(){state.userDirectory={search:'',lab:'',role:'',sort:'lab',descending:false,days:90};}
 const t=(zh,en)=>state.lang==='en'?en:zh;
 const label=k=>labels[k]?t(...labels[k]):k;
 const calendarLabel=k=>k==='pending'?t('等待日曆同步','Calendar sync pending'):label(k);
@@ -28,6 +30,7 @@ new MutationObserver(()=>{void hydratePhotos();}).observe(document.documentEleme
 const wf=createWorkflowUI(()=>({d,state,t,esc,button,panel,head,options,instrumentBar,management,labAccess,me,badge,canSign,empty,label,fmt,username,field,modal,run,api,system,optionName,toast}));
 const planner=createPlanningUI(()=>({d,state,t,esc,button,panel,head,options,management,me,empty,label,fmt,username,field,modal,run,api,system,toast,labname,active,range,refresh,err,render,money,optionName}));
 const accounts=createAccountUI(()=>({d,state,t,esc,button,panel,head,options,management,me,empty,label,fmt,username,field,modal,run,api,system,toast,labname,active,range,refresh,err,render}));
+const directory=createUserDirectory(()=>({d,state,t,esc,button,head,options,system,me,username,labname,label,active,manages,badge,fmt}));
 const myCalendar=createMyCalendar(()=>({d,state,t,esc,button,panel,options,empty,label,me,bookingCard,modal,render}));
 const security=createSecurityUI(()=>({d,state,t,esc,button,panel,field,me,modal,api,system,active,fmt,toast,languageControls,bindLanguage,refresh,err}));
 const me=()=>d.me;
@@ -48,7 +51,7 @@ const panel=(title,content,sub='',action='')=>`<section class="panel"><div class
 const field=(title,input)=>`<label class="field">${title}${input}</label>`;
 const options=(values,selected)=>values.map(([v,l])=>`<option value="${esc(v)}" ${v===selected?'selected':''}>${esc(l)}</option>`).join('');
 function toast(msg){$('#toast').textContent=msg;$('#toast').classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('#toast').classList.remove('show'),5000);}
-function resetIdentityView(){d=null;state.manage=false;state.page='home';state.selected.clear();state.anchor=null;state.probeTable=null;state.calendarReady=false;state.certDraft.clear();state.analyticsResult=null;state.analyticsSequence++;state.analysis.lab='';state.auth='login';const dialog=$('#dialog');dialog.close();dialog.innerHTML='';busy=false;if(api.info)renderAuth();else $('#app').textContent=t('確認登入狀態…','Checking sign-in…');}
+function resetIdentityView(){d=null;state.manage=false;state.page='home';state.selected.clear();state.anchor=null;state.probeTable=null;state.calendarReady=false;state.certDraft.clear();resetDirectory();state.analyticsResult=null;state.analyticsSequence++;state.analysis.lab='';state.auth='login';const dialog=$('#dialog');dialog.close();dialog.innerHTML='';busy=false;if(api.info)renderAuth();else $('#app').textContent=t('確認登入狀態…','Checking sign-in…');}
 api.onSessionChange=phase=>{clearPhotos();resetIdentityView();if(phase==='changed')(api.info?refresh():api.init().then(refresh)).catch(e=>toast(err(e)));};
 function pendingPanel(){const p=api.pending();if(!p)return '';let action;try{action=JSON.parse(p.encoded).action;}catch{}return '<section class="panel"><div class="panel-body"><strong>'+t('上次操作結果尚未確認','An earlier operation needs confirmation')+'</strong><p>'+esc(label(action||''))+' · '+t('請確認結果後再繼續。已成功的操作不會重複建立。','Resolve it before continuing. Completed operations will not be repeated.')+'</p><div class="card-actions">'+button(t('檢查／重試上次操作','Check / retry'),'recover-pending')+button(t('撤回未確認操作','Withdraw unconfirmed operation'),'abandon-pending')+'</div></div></section>';}
 api.onPendingChange=()=>{const box=$('#pending-operation');if(box)box.innerHTML=pendingPanel();};
@@ -151,7 +154,7 @@ function bindAnalytics(){
  document.querySelectorAll('[data-analysis-tab]').forEach(el=>el.onclick=()=>{filters.tab=el.dataset.analysisTab;render();});
 }
 
-function usersView(){return `<div class="toolbar">${system(me())?button(t('新增實驗室','Add lab'),'add-lab'):''}${d.access?.canTest&&!d.access.testing?button(t('角色測試','Test roles'),'start-test'):''}</div>`+head(t('帳號與權限','Accounts & access'),system(me())?t('認證實驗室代表、調整層級，及管理所有下級帳號。','Certify lab representatives, assign roles and manage subordinate accounts.'):t('管理直屬成員；無法修改其他實驗室或管理者的權限。','Manage your own members. Other labs and manager roles are protected.'))+`<section class="panel table-scroll"><table class="table"><thead><tr>${[t('姓名 / 單位','Name / lab'),t('層級','Role'),t('狀態','Status'),t('儀器認證','Instrument certification'),t('操作','Actions')].map(x=>`<th>${x}</th>`).join('')}</tr></thead><tbody>${d.users.map(u=>`<tr><td>${esc(username(u.id))}<small>${esc(labname(u.lab_id))}</small></td><td>${label(u.role)}</td><td>${badge(active(u)?u.status:u.status==='approved'?'disabled':u.status)}${u.suspended_until?`<small>${fmt(u.suspended_until)}</small>`:''}</td><td>${button(t('查看認證','View certification'),'member-certifications',u.id)}</td><td>${u.id!==me().id&&manages(me(),u)?button(t('設定權限','Edit access'),'user',u.id):'—'}</td></tr>`).join('')}</tbody></table></section>`;}
+function usersView(){return directory.view();}
 function settingsViewBase(){const r=rulesFor(d,me()),g=d.rules.global;return head(t('預約規則','Booking rules'),system(me())?t('設定全系統使用時段與審核權限。','Set system-wide access hours and approval authority.'):t('設定本實驗室規則；主系統限制仍優先適用。','Set lab rules. System-wide restrictions still take precedence.'))+`<div class="settings-grid">${panel(t('目前生效規則','Effective rules'),`<div class="rule-values"><div>${t('一般開放時段','Standard hours')}<b>${r.start_hour}:00–${r.end_hour}:00</b></div><div>${t('單次預約上限','Session limit')}<b>${r.max_hours} ${t('小時','hours')}</b></div><div>${t('週末','Weekends')}<b>${label(r.weekend)}</b></div><div>${t('一般時段以外','After hours')}<b>${label(r.evening)}</b></div><div>${t('延長批准權限','Extension approver')}<b>${label(r.extension_role)}</b></div><div>${t('每小時費率','Hourly rate')}<b>${money(g.hourly_rate)}</b></div></div>${button(t('修改規則','Edit rules'),'rules','','')}`,t('時段依各儀器認證；一般使用者的預約仍須送審。','Hours follow instrument certification; members still need approval.'))}${panel(t('Google 日曆','Google Calendar'),`<p>${d.calendarMode==='google'?t('已啟用後臺同步。','Server synchronization is enabled.'):t('尚未連線','Not connected')}</p><p class="note">${t('未核准申請不建立事件。取消或延長會更新同一筆事件；同步失敗保留紀錄並重試。','Pending requests create no events. Cancellations and extensions update the same event. Failed syncs are retained and retried.')}</p>${system(me())&&d.calendar_jobs.length?`<div class="history-list">${d.calendar_jobs.map(j=>`<div class="history-row">${esc(j.booking_id.slice(0,8))} · ${j.operation==='delete'?t('刪除','Delete'):t('建立 / 更新','Create / update')} ${badge(j.status,calendarLabel(j.status))} ${j.status==='failed'?button(t('重試','Retry'),'retry',j.id):''}</div>`).join('')}</div>`:''}`)}</div>`;}
 function settingsView(){return settingsViewBase()+wf.notifications();}
 function table(headers,rows){return rows.length?`<section class="panel table-scroll"><table class="table"><thead><tr>${headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></section>`:empty();}
@@ -185,9 +188,9 @@ function bind(){
  if($('#probe-table'))$('#probe-table').onchange=e=>{state.probeTable=e.target.value;render();};
  if($('#instrument-select'))$('#instrument-select').onchange=e=>{state.instrument=e.target.value;state.selected.clear();state.anchor=null;state.probeTable=null;state.calendarReady=state.page==='calendar';if(state.page==='instrument-settings'&&!instrumentAdmin(me(),instrument()))state.page='calendar';if(state.page==='calendar')openCalendar();else render();};
  document.querySelectorAll('[data-resource-page]').forEach(el=>el.onclick=()=>{state.page=el.dataset.resourcePage;if(state.page==='calendar')openCalendar();else render();});
- bindAnalytics();bindCertifications();bindSelection();
+ bindAnalytics();bindCertifications();bindSelection();directory.bind();
 }
-async function changeTest(id){state.analyticsResult=null;state.analyticsSequence++;state.analysis.lab='';state.certDraft.clear();await api.switchUser(id);d=null;state.manage=false;state.page='home';state.selected.clear();state.anchor=null;state.probeTable=null;state.calendarReady=false;await refresh();}
+async function changeTest(id){state.analyticsResult=null;state.analyticsSequence++;state.analysis.lab='';state.certDraft.clear();resetDirectory();await api.switchUser(id);d=null;state.manage=false;state.page='home';state.selected.clear();state.anchor=null;state.probeTable=null;state.calendarReady=false;await refresh();}
 async function releaseAction(action,id,el,event){
  if(action==='export-analytics'){downloadBlob(new Blob([analyticsCsv(state.analyticsResult?.details||[])],{type:'text/csv;charset=utf-8'}),'afm-bookings.csv');return true;}
  if(action==='load-analytics'){await loadAnalytics();return true;}
@@ -203,9 +206,9 @@ async function releaseAction(action,id,el,event){
  if(action==='auth'){state.auth=id;renderAuth();return true;}
  if(action==='reconnect'){await api.init();await refresh();return true;}
  if(action==='recover-pending'||action==='abandon-pending'){const withdraw=action==='abandon-pending';modal(withdraw?t('撤回未確認操作','Withdraw unconfirmed operation'):t('復原上次操作','Recover earlier operation'),'<p>'+t(withdraw?'尚未完成的操作會被封鎖，遲到的請求也不會執行；已完成的操作會保留，不會取消。':'先查詢後臺結果；若尚未收到，會使用相同操作編號重試。',withdraw?'An unfinished operation will be blocked, including late requests. Completed work is retained.':'Check the saved result first; if not received, retry using the same operation identifier.')+'</p>',async()=>{const result=await(withdraw?api.abandonPending():api.recoverPending());toast(result.status==='completed'?t('上次操作已確認完成。','The earlier operation is confirmed complete.'):t('未完成的操作已撤回。','The unfinished operation has been withdrawn.'));});return true;}
- if(action==='logout'){state.certDraft.clear();state.analyticsResult=null;state.analyticsSequence++;state.analysis.lab='';await api.logout();d=null;state.selected.clear();state.anchor=null;state.probeTable=null;await api.init();state.auth='login';renderAuth();return true;}
+ if(action==='logout'){state.certDraft.clear();resetDirectory();state.analyticsResult=null;state.analyticsSequence++;state.analysis.lab='';await api.logout();d=null;state.selected.clear();state.anchor=null;state.probeTable=null;await api.init();state.auth='login';renderAuth();return true;}
  if(action==='start-test'){await changeTest('admin');return true;}
- if(action==='end-test'){await api.exitTest();d=null;state.page='home';state.manage=false;state.calendarReady=false;state.selected.clear();state.anchor=null;await refresh();return true;}
+ if(action==='end-test'){await api.exitTest();resetDirectory();d=null;state.page='home';state.manage=false;state.calendarReady=false;state.selected.clear();state.anchor=null;await refresh();return true;}
  if(action==='new-booking'){openCalendar();return true;}
  if(action==='select-slot'){if(state.suppressClick){state.suppressClick=false;return true;}selectSlot(Number(el.dataset.ts),event?.shiftKey);return true;}
  if(action==='clear-selection'){state.selected.clear();state.anchor=null;updateSelection();return true;}
