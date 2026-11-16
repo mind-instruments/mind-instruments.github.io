@@ -27,7 +27,7 @@ export class Client {
   if(pending&&pending.identity!==identity)throw Error('pending_context_changed');
   if(!pending)pending={id:crypto.randomUUID(),encoded,identity};sessionStorage.setItem(key,JSON.stringify(pending));this.onPendingChange?.();
   try{const out=await this.request('command',{...payload,request_id:pending.id});if(epoch!==this.sessionEpoch)throw Error('session_changed');this.clearPending(key);return out;}
-  catch(e){if(epoch!==this.sessionEpoch)throw Error('session_changed');if(!['server_error','storage_unavailable','login_required','session_changed'].includes(e.message))this.clearPending(key);throw e;}
+  catch(e){if(epoch!==this.sessionEpoch)throw Error('session_changed');if(!['server_error','storage_unavailable','login_required','session_changed'].includes(e.message))this.clearPending(key);throw e.message==='server_error'?Error('submission_unconfirmed'):e;}
  }
  async recoverPending(){
   if(this.authChanging||!this.sessionScope)throw Error('session_changed');const epoch=this.sessionEpoch,pending=this.pending(),key='afm-pending-command:'+this.sessionScope;if(!pending)return {status:'none'};

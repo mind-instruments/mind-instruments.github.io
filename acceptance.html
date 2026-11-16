@@ -1,1 +1,25 @@
-<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><title>CNMM 驗收</title><link rel="stylesheet" href="styles.css"><main style="max-width:900px;margin:40px auto;padding:24px"><h1>CNMM 儀器預約</h1><p>新網址部署驗收進行中。<a href="/">返回網站</a></p></main>
+<!doctype html>
+<html lang="zh-Hant">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CNMM 公開網站驗收</title><link rel="stylesheet" href="/styles.css">
+<style>body{background:#f6f6ef;color:#23494a;font-family:system-ui,'Microsoft JhengHei',sans-serif;line-height:1.8}main{max-width:900px;margin:36px auto;padding:24px}section{background:#fff;border:1px solid #dce5d7;border-radius:14px;padding:22px;margin:18px 0}h1,h2{line-height:1.4}a{color:#086b71}li{margin:8px 0}</style>
+<main>
+<p><a href="/">返回網站</a> · <a href="/guide/">操作指南</a></p>
+<h1>CNMM 公開網站驗收</h1>
+<p>2026-11-16 · GitHub Pages 前端與 CNMM 專用 Supabase 後臺</p>
+<section><h2>已完成</h2><ul>
+<li>新網址可載入登入頁；原最高管理者已在新網址完成密碼重設及登入。</li>
+<li>在隔離的角色測試資料中，依序切換主系統管理者、兩個不同實驗室代表及一般成員；一般成員的管理功能不出現，另一實驗室的代表看不到實驗室 A 的預約。</li>
+<li>一般成員於 Vero AFM 日曆選取連續兩小時，送出後顯示待審；實驗室 A 代表核准後顯示已預約；一般成員取消後顯示已取消。核准回應曾延遲，資料保存後透過待確認操作復原。</li>
+<li>一般成員在探針表選取 A2、確認拿取人、簽署後於持有清單看到 A2，再歸還，持有清單恢復原狀。</li>
+<li>後臺跨來源測試：新網址的合法請求通過，未登入請求被拒，陌生網站來源被拒；舊網址的 cookie 流程與新網址的分頁憑證互不混用。</li>
+<li>Google 授權回呼的隔離測試確認會返回發起授權的新網址，且一次性授權不能重放。</li>
+<li>CNMM 正式資料在遷移前後的備份內容雜湊相同；聚餐網站的後臺函式未更新。</li>
+</ul></section>
+<section><h2>邊界與待驗證</h2><ul>
+<li>角色測試使用隔離資料；未以正式成員帳號建立真實預約或寄出新測試郵件。</li>
+<li>新網址的個人 Google 日曆連結已通過隔離回呼測試，尚未由本人在新網址重新授權並完成真實日曆同步驗收。</li>
+<li>實體手機觸控及大型附件傳輸仍需在目標裝置與網路環境驗收。</li>
+<li>前端與聚餐網站共用 Supabase 免費專案資源；CNMM 業務資料及函式使用獨立命名空間。</li>
+</ul></section>
+</main></html>
