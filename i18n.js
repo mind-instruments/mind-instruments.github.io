@@ -34,6 +34,9 @@ Object.assign(errors,{"invite_invalid":["邀請碼已失效、信箱不符或已
 
 Object.assign(errors,{session_changed:['登入身分或資料已更新，請重新整理後再操作。','Your session or data changed. Refresh before trying again.'],operator_required:['代工預約須先指定合格操作員，並由操作員簽到。','Assign a qualified operator to check in for an assisted booking.']});
 
+Object.assign(labels,{blacklisted:['黑名單','Blacklisted'],offboard_manager:['管理者已退場','Manager offboarded'],set_blacklist:['黑名單狀態已更新','Blacklist updated']});
+Object.assign(errors,{blacklisted:['此帳號已列入黑名單，請聯絡主系統管理者。','This account is blacklisted. Contact a system administrator.'],offboard_successor:['請先指定同層級、已啟用的接任管理者。','Choose an active successor of the same manager role.'],offboard_obligations:['請先處理本人預約、持有耗材、實驗室帳戶及未結交接。','Resolve personal bookings, held items, lab accounts and pending handovers first.']});
+
 Object.assign(errors,{pending_context_changed:['帳號權限或所屬實驗室已變更，請撤回未確認操作後重新建立。','Your role or lab changed. Withdraw the unconfirmed operation before starting again.'],submission_abandoned:['這筆未確認操作已撤回，遲到的請求不會執行。','This unconfirmed operation was withdrawn. Late requests will not run.'],pending_submission:['請先使用頁面上的復原選項確認上次操作。','Use the recovery options to resolve the earlier operation first.']});
 
 Object.assign(errors,{

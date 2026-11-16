@@ -2,10 +2,10 @@ import {directoryRows} from './user-directory.js';
 
 export function createUserDirectory(get){
  function rows(){
-  const c=get(),{d,state,t,esc,button,username,labname,label,active,me,manages}=c;
+  const c=get(),{d,state,t,esc,button,username,labname,label,active,me,manages,system}=c;
   const days=Number(state.userDirectory.days);
   const items=directoryRows(d.users,d.bookings,d.labs,state.userDirectory);
-  const markup=items.map(({user,count})=>`<tr><td><strong>${esc(username(user.id))}</strong><small>${esc(user.email||'—')}</small></td><td>${esc(labname(user.lab_id))}</td><td>${esc(label(user.role))}</td><td>${c.badge(active(user)?user.status:user.status==='approved'?'disabled':user.status)}${user.suspended_until?`<small>${c.fmt(user.suspended_until)}</small>`:''}</td><td><strong>${count}</strong></td><td>${button(t('查看認證','View certification'),'member-certifications',user.id)}</td><td>${user.id!==me().id&&manages(me(),user)?button(t('設定權限','Edit access'),'user',user.id):'—'}</td></tr>`).join('')||`<tr><td colspan="7" class="directory-empty">${t('找不到符合的使用者','No matching members')}</td></tr>`;
+  const markup=items.map(({user,count})=>`<tr><td><strong>${esc(username(user.id))}</strong><small>${esc(user.email||'—')}</small></td><td>${esc(labname(user.lab_id))}</td><td>${esc(label(user.role))}</td><td>${c.badge(user.blacklisted_at?'blacklisted':active(user)?user.status:user.status==='approved'?'disabled':user.status)}${user.suspended_until?`<small>${c.fmt(user.suspended_until)}</small>`:''}</td><td><strong>${count}</strong></td><td>${button(t('查看認證','View certification'),'member-certifications',user.id)}</td><td>${user.id!==me().id&&manages(me(),user)?`${user.blacklisted_at?'':button(t('設定權限','Edit access'),'user',user.id)} ${system(me())&&['system_admin','lab_manager'].includes(user.role)?button(t('管理者退場','Offboard manager'),'offboard-manager',user.id):''} ${system(me())?button(user.blacklisted_at?t('解除黑名單','Remove blacklist'):t('列入黑名單','Blacklist'),'blacklist-user',user.id):''}`:'—'}</td></tr>`).join('')||`<tr><td colspan="7" class="directory-empty">${t('找不到符合的使用者','No matching members')}</td></tr>`;
   return {markup,count:items.length,days};
  }
  function view(){

@@ -6,7 +6,7 @@ import {applyWorkflow, slotsFor} from './workflows.js';
 import { DEFAULT_INSTRUMENT, defaultInstrument, upgradeData, resourceId, instrumentFor, instrumentAdmin, instrumentAccess, configureInstrument, certificationLevels, certificationFor, qualification, bookingMethod } from './resources.js';
 // Authoritative mutations execute on the server; the browser reuses validation for feedback.
 export const HOUR = 3600000;
-export const active = (u, now = Date.now()) => u?.status === 'approved' && (!u.suspended_until || +new Date(u.suspended_until) <= now);
+export const active = (u, now = Date.now()) => u?.status === 'approved' && !u.blacklisted_at && (!u.suspended_until || +new Date(u.suspended_until) <= now);
 export const system = u => u?.role === 'system_admin';
 export const manager = u => ['system_admin', 'lab_manager'].includes(u?.role);
 export const manages = (u, target) => system(u) || (u?.role === 'lab_manager' && target?.lab_id === u.lab_id && target.role === 'user');
@@ -63,11 +63,11 @@ export function validateSlot(d, user, start, end, now, exclude, extension = fals
 export function canSign(d, user, p) { if(d.probe_tables?.find(t=>t.id===p.table_id)?.status==='draft')return false; return active(user) && (manager(user) || user.can_take) && p.lab_id != null && (system(user) || (user.lab_id === p.lab_id && (manager(user) || p.grants.includes(user.id)))); }
 export function snapshot(d, id, calendarMode = 'simulated') {
   d=upgradeData(structuredClone(d));
-  const u = d.users.find(x => x.id === id); need(u, 'login_required');
+  const u = d.users.find(x => x.id === id); need(u && !u.blacklisted_at, 'login_required');
   const ownOrManaged = x => x.user_id === id || x.operator_id === id || (active(u) && labAccess(u, x.lab_id));
   const result = {
     version: d.version, schema_revision:d.schema_revision||6, certifications:(d.certifications||[]).filter(c=>c.user_id===id||active(u)&&manages(u,d.users.find(x=>x.id===c.user_id))), instruments:(d.instruments||[defaultInstrument()]).map(i=>({...i,authorized_user_ids:active(u)&&instrumentAdmin(u,i)?i.authorized_user_ids:i.authorized_user_ids.filter(id=>id===u.id)})), me: u, labs: d.labs, rules: { global: d.rules.global, labs: system(u) ? d.rules.labs : { [u.lab_id]: d.rules.labs[u.lab_id] } }, calendarMode,
-    users: d.users.filter(x => x.id === id || (active(u) && (system(u) || x.lab_id === u.lab_id && manager(u)))),
+    users: d.users.filter(x => x.id === id || (active(u) && (system(u) || x.lab_id === u.lab_id && manager(u)))).map(x=>{if(system(u))return x;const {blacklist_history,blacklist_reason,blacklisted_by,...visible}=x;return visible;}),
     people: d.users.filter(x => x.lab_id === u.lab_id || system(x) || d.bookings.some(b => b.user_id === id && b.responsible_id === x.id)).map(({ id, name }) => ({ id, name })),
     probe_tables: (d.probe_tables || []).filter(t => (t.status!=='draft'||active(u)&&labAccess(u,t.lab_id)) && (active(u) && (system(u) || !t.lab_id || t.lab_id === u.lab_id) || d.probes.some(p => p.table_id === t.id && p.holder === id))),
     // Occupancy is shared. Private fields and identities are not.
@@ -75,7 +75,7 @@ export function snapshot(d, id, calendarMode = 'simulated') {
     probes: d.probes.filter(p => (d.probe_tables.find(t=>t.id===p.table_id)?.status!=='draft'||active(u)&&labAccess(u,p.lab_id)) && ( p.holder === id || (active(u) && (system(u) || !p.lab_id || p.lab_id === u.lab_id)))).map(p => ({ ...p, grants: manager(u) ? p.grants : p.grants.filter(x => x === id) })),
     purchases: d.purchases.filter(ownOrManaged), extensions: d.extensions.filter(ownOrManaged),
     usages: d.usages.filter(x => x.user_id === id || (active(u) && labAccess(u, x.lab_id ?? d.probes.find(p=>p.id===x.probe_id)?.lab_id))),
-    audit: d.audit.filter(x => x.actor_id === id || x.user_id === id || (active(u) && labAccess(u, x.lab_id))),
+    audit: d.audit.filter(x => (system(u)||x.action!=='set_blacklist')&&(x.actor_id === id || x.user_id === id || (active(u) && labAccess(u, x.lab_id)))),
     ...handoverSnapshot(d,u),...planningSnapshot(d,u),notification_rules:d.notification_rules,
     attendance_requests:d.attendance_requests.filter(ownOrManaged),
     stock_movements:d.stock_movements.filter(x=>active(u)&&labAccess(u,x.lab_id)),
@@ -96,6 +96,7 @@ function queueCalendar(d, b, mode, now) {
 export function command(source, actorId, action, a = {}, { now = Date.now(), calendarMode = 'simulated' } = {}) {
   const d = upgradeData(structuredClone(source)), u = d.users.find(x => x.id === actorId), stamp = new Date(now).toISOString();
   need(u, 'login_required');
+  need(!u.blacklisted_at, 'blacklisted');
   need(active(u, now) || ['cancel_booking', 'return_probe', 'probe_condition', 'checkout_booking', 'request_attendance'].includes(action), 'inactive');
   const find = (xs, id) => { const x = xs.find(x => x.id === id); need(x, 'not_found'); return x; };
   let entity, subject = u, detail = {};
@@ -190,10 +191,32 @@ export function command(source, actorId, action, a = {}, { now = Date.now(), cal
     case 'update_user': {
       need(['can_book','can_take'].every(k=>a[k]===undefined||typeof a[k]==='boolean'),'invalid_input');
       const t = find(d.users, a.id); need(t.id !== u.id && manages(u, t), 'forbidden'); need(['approved', 'disabled', 'pending'].includes(a.status) && ['basic', 'advanced'].includes(a.level), 'invalid_input');
+      need(!t.blacklisted_at,'blacklisted');
       const before = { ...t }; if (system(u)) { need(['system_admin', 'lab_manager', 'user'].includes(a.role), 'invalid_input'); if (a.lab_id) find(d.labs, a.lab_id); need(!a.lab_id || a.lab_id === t.lab_id || (!d.probes.some(p => p.holder === t.id) && !d.bookings.some(b => b.user_id === t.id && (occupied(b) || b.status === 'pending')) && !d.purchases.some(p => p.user_id === t.id && p.status === 'pending') && !d.lab_accounts.some(x=>x.custodian_id===t.id&&x.status==='active') && !d.handovers.some(h=>[h.from_id,h.to_id].includes(t.id)&&!['completed','cancelled'].includes(h.status))), 'open_assignments'); if(a.role!==t.role&&a.role==='user')for(const h of d.handovers.filter(h=>h.to_id===t.id&&!['completed','cancelled'].includes(h.status))){h.approved_by=null;h.approved_at=null;h.requires_approval=true;h.status=h.accepted_at?'awaiting_approval':'awaiting_acceptance';h.revision++;}
       t.role = a.role; t.lab_id = a.lab_id || t.lab_id; if (t.role === 'lab_manager') { t.certified_by = u.id; t.certified_at = stamp; } }
       else need(!a.role || a.role === t.role, 'forbidden');
       Object.assign(t, { status: a.status, level: a.level, can_book: Boolean(a.can_book), can_take: Boolean(a.can_take) }); if (a.status === 'approved') t.suspended_until = null; entity = t; subject = t; detail = { before, after: { ...t } }; break;
+    }
+    case 'offboard_manager': {
+      need(system(u),'forbidden');
+      const t=find(d.users,a.id),successor=find(d.users,a.successor_id),reason=text(a.reason,500);
+      need(t.id!==u.id&&manager(t),'forbidden');need(reason,'reason_required');
+      need(successor.id!==t.id&&active(successor,now)&&successor.role===t.role&&(t.role==='system_admin'||successor.lab_id===t.lab_id),'offboard_successor');
+      need(!d.bookings.some(b=>(b.user_id===t.id||b.operator_id===t.id)&&(['pending','booked'].includes(b.status)&&+new Date(b.end)>now||b.status==='checked_in'))&&!d.probes.some(p=>p.holder===t.id)&&!d.lab_accounts.some(x=>x.custodian_id===t.id&&x.status==='active')&&!d.handovers.some(h=>[h.from_id,h.to_id].includes(t.id)&&!['completed','cancelled'].includes(h.status)),'offboard_obligations');
+      const before={...t},reassigned=[];
+      for(const b of d.bookings.filter(b=>b.responsible_id===t.id&&['pending','booked','checked_in'].includes(b.status)&&+new Date(b.end)>now)){b.original_responsible_id||=t.id;b.responsible_id=successor.id;reassigned.push(b.id);}
+      for(const instrument of d.instruments){if(instrument.manager_ids?.includes(t.id)){instrument.manager_ids=instrument.manager_ids.filter(id=>id!==t.id);if(successor.role==='lab_manager'&&!instrument.manager_ids.includes(successor.id))instrument.manager_ids.push(successor.id);}}
+      Object.assign(t,{role:'user',status:'disabled',can_book:false,can_take:false,offboarded_at:stamp,offboarded_by:u.id,offboarded_to:successor.id,offboard_reason:reason});
+      entity=t;subject=t;detail={before,after:{...t},successor_id:successor.id,reassigned_booking_ids:reassigned,reason};break;
+    }
+    case 'set_blacklist': {
+      need(system(u),'forbidden');const t=find(d.users,a.id),reason=text(a.reason,500);
+      need(t.id!==u.id,'forbidden');need(typeof a.enabled==='boolean'&&reason,'reason_required');
+      need(Boolean(t.blacklisted_at)!==a.enabled,'invalid_input');
+      const before={...t};t.blacklist_history||=[];t.blacklist_history.push({at:stamp,by:u.id,enabled:a.enabled,reason});
+      if(a.enabled){Object.assign(t,{blacklisted_at:stamp,blacklisted_by:u.id,blacklist_reason:reason,status:'disabled',can_book:false,can_take:false});d.password_resets=(d.password_resets||[]).filter(x=>x.user_id!==t.id);for(const job of d.mail_jobs||[])if(job.kind==='password_reset'&&job.user_id===t.id&&['pending','failed','not_configured'].includes(job.status)){job.status='cancelled';delete job.body;}}
+      else {t.blacklisted_at=null;t.blacklisted_by=null;t.blacklist_reason=null;}
+      entity=t;subject=t;detail={before,after:{...t},reason};break;
     }
     case 'update_rules': {
       need(manager(u), 'forbidden'); const r = a.rules; need(r && Number.isInteger(r.start_hour) && Number.isInteger(r.end_hour) && r.start_hour >= 0 && r.end_hour <= 24 && r.start_hour < r.end_hour && Number.isInteger(r.max_hours) && r.max_hours >= 1 && r.max_hours <= 24 && ['all', 'advanced', 'closed'].includes(r.weekend) && ['all', 'advanced', 'closed'].includes(r.evening) && ['system_admin', 'lab_manager'].includes(r.extension_role), 'invalid_rules');
