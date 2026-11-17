@@ -7,7 +7,7 @@ export function zonedTime(value,zone='Asia/Taipei'){
  const offsets=new Set();for(const delta of [-2,-1,0,1,2]){const t=wall+delta*86400000,v=parts(t);offsets.add(Date.UTC(v.year,v.month-1,v.day,v.hour,v.minute,v.second)-t);}
  const matches=[...offsets].map(o=>wall-o).filter(t=>{const v=parts(t);return v.year===p[0]&&v.month===p[1]&&v.day===p[2]&&v.hour===p[3]&&v.minute===p[4]&&v.second===p[5];});need(matches.length===1,'import_ambiguous_time');return new Date(matches[0]).toISOString();
 }
-function csv(text){
+export function csv(text){
  const rows=[];let row=[],field='',state='start';
  const finishField=()=>{row.push(field);field='';state='start';};
  const finishRow=()=>{finishField();if(row.some(Boolean))rows.push(row);row=[];};
