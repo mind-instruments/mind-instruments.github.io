@@ -19,8 +19,10 @@ export function importHistory(d,u,rows,reason,now=Date.now()){
  for(let index=0;index<rows.length;index++){try{
  const raw=rows[index];assert(raw&&typeof raw==='object'&&Object.keys(raw).every(k=>historyKeys.includes(k))&&historyKeys.every(k=>raw[k]==null||typeof raw[k]==='string'||typeof raw[k]==='number'),'欄位格式錯誤');const r=Object.fromEntries(historyKeys.map(k=>[k,String(raw[k]??'')]));assert(historyKeys.every(k=>r[k].length<=(k==='notes'?2000:200)),'欄位過長（備註限 2000 字，其他欄位限 200 字）');
  assert(/^[A-Za-z0-9_-]{1,100}$/.test(r.source_id),'source_id 限 100 字元英數、底線或連字號');assert(['booking','purchase','usage'].includes(r.type),'type 必須為 booking、purchase 或 usage');
- const person=d.users.find(x=>x.id===r.user_id),lab=d.labs.find(x=>x.id===r.lab_id),i=d.instruments.find(x=>x.id===r.instrument_id);assert(person&&lab&&i,'帳戶、實驗室或儀器不存在');assert(person.lab_id===lab.id,'帳戶不屬於指定實驗室');assert(u.role==='system_admin'||lab.id===u.lab_id&&(u.role==='lab_manager'||person.id===u.id),'超出補登範圍');
- const old=all.find(x=>x.historical_row?.source_id===r.source_id);if(old){assert(historyKeys.every(k=>String(old.historical_row[k]??'')===r[k]),'source_id 已存在且內容不同');skipped++;continue;}
+ const inScope=x=>u.role==='system_admin'||x.lab_id===u.lab_id&&(u.role==='lab_manager'||x.user_id===u.id);
+ assert(inScope(r),'超出補登範圍');
+ const old=all.find(x=>x.historical_row?.source_id===r.source_id);if(old){assert(inScope(old),'超出補登範圍');assert(historyKeys.every(k=>String(old.historical_row[k]??'')===r[k]),'source_id 已存在且內容不同');skipped++;continue;}
+ const person=d.users.find(x=>x.id===r.user_id),lab=d.labs.find(x=>x.id===r.lab_id),i=d.instruments.find(x=>x.id===r.instrument_id);assert(person&&lab&&i,'帳戶、實驗室或儀器不存在');assert(person.lab_id===lab.id,'帳戶不屬於指定實驗室');
  assert((!r.user_label||r.user_label===person.name)&&(!r.lab_label||r.lab_label===lab.name)&&(!r.instrument_label||r.instrument_label===i.name),'帳戶、實驗室或儀器標籤與 ID 不符，請重新下載範例');
  assert(validTimestamp(r.start)&&Date.parse(r.start)<now,'開始／購買日期須為過去時間，包含時區');const s=Date.parse(r.start),e=Date.parse(r.end);if(r.type!=='purchase')assert(validTimestamp(r.end)&&e>s&&e<=now&&(r.type!=='booking'||e-s<=86400000),'結束日期須晚於開始且不得超過現在，儀器單筆最多 24 小時');
  const stamp=new Date(now).toISOString(),meta={id:crypto.randomUUID(),lab_id:lab.id,user_id:person.id,instrument_id:i.id,historical_row:r,historical_reason:reason.trim(),recorded_at:stamp,recorded_by:u.id};let item;
