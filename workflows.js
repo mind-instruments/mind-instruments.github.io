@@ -1,4 +1,5 @@
 import {upgradeHandovers} from './handover.js';
+import {applyProbeModel,probeFields,visibleProbeModels} from './probe-models.js';
 // Shared workflow rules. Every mutation runs on a cloned, server-owned snapshot.
 const need=(ok,code='invalid_input')=>{if(!ok)throw Error(code);};
 const clean=(s,n=2000)=>String(s??'').trim().slice(0,n);
@@ -8,26 +9,28 @@ const find=(xs,id)=>{const x=xs.find(x=>x.id===id);need(x,'not_found');return x;
 export const slotsFor=(rows,columns)=>Array.from({length:rows},(_,r)=>Array.from({length:columns},(_,c)=>String.fromCharCode(65+r)+(c+1))).flat();
 export function layoutFor(quantity){const size=Math.max(1,Number(quantity)||1),columns=size<=10?size:size>260?20:size>=50?10:Array.from({length:11-Math.ceil(Math.sqrt(size))},(_,n)=>Math.ceil(Math.sqrt(size))+n).find(n=>size%n===0)||10;return {rows:Math.ceil(size/columns),columns};}
 export function upgradeWorkflows(d){
- d.mail_jobs||=[];d.attendance_requests||=[];d.stock_movements||=[];d.assets||=[];d.rule_history||=[];
+ d.mail_jobs||=[];d.attendance_requests||=[];d.stock_movements||=[];d.assets||=[];d.rule_history||=[];d.probe_models||=[];
  d.notification_rules||={checkin_before:15,checkin_close:10,checkin_reminder:5,checkout_reminder:10,escalation:60};
  for(const t of d.probe_tables||[]){t.status||='published';t.revision||=1;t.ordered_quantity??=d.probes.filter(p=>p.table_id===t.id).length;t.received_quantity??=d.probes.filter(p=>p.table_id===t.id).length;t.default_grants||=[];}
  return upgradeHandovers(d);
 }
 export function applyWorkflow(d,u,action,a,now){
  const stamp=new Date(now).toISOString(),id=()=>crypto.randomUUID();
+ const catalog=applyProbeModel(d,u,action,a,stamp);if(catalog)return catalog;
  const movement=(p,type,reason,before)=>d.stock_movements.push({id:id(),probe_id:p.id,table_id:p.table_id,instrument_id:p.instrument_id,lab_id:p.lab_id,type,reason:clean(reason),before,after:structuredClone(p),actor_id:u.id,created_at:stamp});
  const metadata=a=>{const out={};for(const k of ['vendor','batch','location','purchase_date','arrival_date'])out[k]=clean(a[k],200);for(const k of ['purchase_date','arrival_date'])need(!out[k]||/^\d{4}-\d{2}-\d{2}$/.test(out[k])&&new Date(out[k]).toISOString().slice(0,10)===out[k]);need(!out.purchase_date||!out.arrival_date||out.arrival_date>=out.purchase_date);for(const k of ['lead_days','safety_stock']){out[k]=Number(a[k]||0);need(Number.isInteger(out[k])&&out[k]>=0&&out[k]<=3650);}return out;};
  const receive=(table,quantity,price,prefix)=>{need(Number.isInteger(quantity)&&quantity>=0&&table.received_quantity+quantity<=table.ordered_quantity);need(Number.isFinite(price)&&price>=0,'invalid_price');let seq=1;for(let n=0;n<quantity;n++){const slot=slotsFor(table.rows,table.columns).find(s=>!d.probes.some(p=>p.table_id===table.id&&p.slot===s&&p.status!=='retired'));need(slot,'capacity_exceeded');let serial;do{serial=prefix+'-'+String(seq++).padStart(6,'0');}while(d.probes.some(p=>p.serial===serial));const p={id:id(),table_id:table.id,instrument_id:table.instrument_id,serial,slot,model:table.model,lab_id:table.lab_id,price,grants:[...table.default_grants],status:'available',condition:'good',holder:null};d.probes.push(p);movement(p,'receipt','',null);}table.received_quantity+=quantity;};
  switch(action){
  case 'add_probe_table':{
+  let model;if(a.model_id){model=visibleProbeModels(d,u).find(m=>m.id===a.model_id);need(model,'forbidden');need(model.instrument_id===(a.instrument_id||'vero-afm'));need(a.model_revision===model.revision,'stale_request');a={...model,...a,model:model.name};}
   need(manage(u),'forbidden');const lab=u.role==='system_admin'?a.lab_id||null:u.lab_id;need(!lab||d.labs.some(l=>l.id===lab));a={...a,instrument_id:a.instrument_id||'vero-afm'};const quantity=a.quantity,layout=layoutFor(a.ordered_quantity??quantity),rows=a.rows??layout.rows,columns=a.columns??layout.columns;
   need(Number.isInteger(quantity)&&quantity>=0&&quantity<=520&&Number.isInteger(rows)&&rows>=1&&rows<=26&&Number.isInteger(columns)&&columns>=1&&columns<=20);need(rows*columns>=quantity,'capacity_exceeded');need(clean(a.name,100)&&clean(a.model,100)&&/^[A-Za-z0-9_-]{1,30}$/.test(a.prefix));need(d.instruments.some(i=>i.id===a.instrument_id),'instrument_not_found');
   const ordered=a.ordered_quantity??quantity;need(Number.isInteger(ordered)&&ordered>=quantity&&ordered<=rows*columns);
-  const t={id:id(),name:clean(a.name,100),model:clean(a.model,100),prefix:a.prefix,instrument_id:a.instrument_id,lab_id:lab,rows,columns,status:'draft',revision:1,ordered_quantity:ordered,received_quantity:0,default_grants:[],created_by:u.id,created_at:stamp,...metadata(a)};d.probe_tables.push(t);receive(t,quantity,a.price,a.prefix);return t;
+  const t={id:id(),name:clean(a.name,100),model:clean(a.model,100),...(model?{model_id:model.id,model_revision:model.revision}:{}),...probeFields(a),...probeFields(a,['supplier_phone']),prefix:a.prefix,instrument_id:a.instrument_id,lab_id:lab,rows,columns,status:'draft',revision:1,ordered_quantity:ordered,received_quantity:0,default_grants:[],created_by:u.id,created_at:stamp,...metadata(a)};d.probe_tables.push(t);receive(t,quantity,a.price,a.prefix);return t;
  }
  case 'edit_probe_table':case 'publish_probe_table':case 'receive_probe_table':case 'table_permissions':{
   const t=find(d.probe_tables,a.id);need(owns(u,t.lab_id),'forbidden');need(a.revision===t.revision,'stale_request');
-  if(action==='edit_probe_table'){need(clean(a.name,100));Object.assign(t,{name:clean(a.name,100),...metadata(a)});}
+  if(action==='edit_probe_table'){need(clean(a.name,100));Object.assign(t,{name:clean(a.name,100),...metadata(a),...probeFields({...t,...a}),...probeFields({...t,...a},['supplier_phone'])});}
   if(action==='publish_probe_table'){need(t.received_quantity>0,'empty_sheet');need(t.photo_id&&d.assets.some(x=>x.id===t.photo_id&&x.table_id===t.id),'photo_required');need(t.purchase_date&&t.arrival_date&&t.vendor&&t.batch,'procurement_required');t.status='published';t.published_at=stamp;}
   if(action==='receive_probe_table')receive(t,a.quantity,a.price,t.prefix||'ITEM');
   if(action==='table_permissions'){need(Array.isArray(a.user_ids));for(const member of a.user_ids)need(find(d.users,member).lab_id===t.lab_id,'wrong_lab');t.default_grants=[...new Set(a.user_ids)];for(const p of d.probes.filter(p=>p.table_id===t.id&&p.lab_id===t.lab_id&&(!a.probe_ids||a.probe_ids.includes(p.id))))p.grants=[...t.default_grants];}

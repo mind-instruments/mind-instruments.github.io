@@ -5,6 +5,7 @@ import {validatePlanningSlot,bookingExtras,assertAcknowledged,planningSnapshot,a
 import {applyPlanning,previewPlanning,reconcilePlanning} from './planning-actions.js';
 import {applyHandover,handoverSnapshot,historyAccess,bookingAccount} from './handover.js';
 import {applyWorkflow, slotsFor} from './workflows.js';
+import {visibleProbeModels} from './probe-models.js';
 import { DEFAULT_INSTRUMENT, defaultInstrument, upgradeData, resourceId, instrumentFor, instrumentAdmin, instrumentAccess, configureInstrument, certificationLevels, certificationFor, qualification, bookingMethod } from './resources.js';
 // Authoritative mutations execute on the server; the browser reuses validation for feedback.
 export const HOUR = 3600000;
@@ -68,6 +69,7 @@ export function snapshot(d, id, calendarMode = 'simulated') {
   const u = d.users.find(x => x.id === id); need(u && !u.blacklisted_at, 'login_required');
   const ownOrManaged = x => x.user_id === id || x.operator_id === id || (active(u) && labAccess(u, x.lab_id));
   const result = {
+    probe_models:active(u)?visibleProbeModels(d,u):[],
     fee_categories:feeCategories(d), version: d.version, schema_revision:d.schema_revision||6, certifications:(d.certifications||[]).filter(c=>c.user_id===id||active(u)&&manages(u,d.users.find(x=>x.id===c.user_id))), instruments:(d.instruments||[defaultInstrument()]).map(i=>({...i,authorized_user_ids:active(u)&&instrumentAdmin(u,i)?i.authorized_user_ids:i.authorized_user_ids.filter(id=>id===u.id)})), me: u, labs: d.labs, rules: { global: d.rules.global, labs: system(u) ? d.rules.labs : { [u.lab_id]: d.rules.labs[u.lab_id] } }, calendarMode,
     users: d.users.filter(x => x.id === id || (active(u) && (system(u) || x.lab_id === u.lab_id && manager(u)))).map(x=>{if(system(u))return x;const {blacklist_history,blacklist_reason,blacklisted_by,...visible}=x;return visible;}),
     people: d.users.filter(x => x.lab_id === u.lab_id || system(x) || d.bookings.some(b => b.user_id === id && b.responsible_id === x.id)).map(({ id, name }) => ({ id, name })),
